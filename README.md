@@ -1,36 +1,69 @@
 # AMM Fee Strategy Challenge
 
-Design Solidity strategies that set dynamic fees for an automated market maker (AMM). Your goal: maximize **Instantaneous Markout (IM)**, a measure of profitability.
+Design dynamic fee strategies for a constant-product AMM. Your goal: maximize **Instantaneous Markout (IM)**.
 
-## Quick Start
+## The Simulation
 
-```bash
-# 1. Build the Rust simulation engine
-cd amm_sim_rs
-pip install maturin
-maturin develop --release
-cd ..
+Each simulation runs 10,000 steps. At each step:
 
-# 2. Install the Python package
-pip install -e .
+1. **Price moves** — A fair price `p` evolves via geometric Brownian motion
+2. **Arbitrageurs trade** — They push each AMM's spot price toward `p`, extracting profit
+3. **Retail orders arrive** — Random buy/sell orders get routed optimally across AMMs
 
-# 3. Validate your strategy
-amm-match validate contracts/src/SimpleStrategy.sol
+Your strategy competes against a **normalizer AMM** running fixed 25 bps fees. Both AMMs start with identical reserves (100 X, 10,000 Y). Retail flow splits optimally between them based on fees—lower fees attract more volume.
 
-# 4. Run simulations
-amm-match run contracts/src/SimpleStrategy.sol
+## The Math
+
+### Constant Product AMM
+
+Reserves `(x, y)` satisfy `x * y = k`. The spot price is `y/x`. When the AMM sells Δx tokens:
+
+```
+Δy = y - k/(x - Δx)    (what trader pays)
 ```
 
-## How It Works
+Fees are taken on input: if fee is `f`, only `(1-f)` of the input affects reserves.
 
-Your strategy runs on an AMM that competes with a default 25 bps AMM. Both AMMs share the same market:
-- If your fees are too high, traders route to the cheaper AMM
-- If your fees are too low, you leave money on the table
-- The goal is to find the optimal fee policy that maximizes your IM score
+### Arbitrage
+
+When spot price diverges from fair price `p`, arbitrageurs trade to close the gap. For fee `f`:
+
+- **Spot < fair** (AMM underprices X): Buy X from AMM. Optimal size: `Δx = x - √(k(1+f)/p)`
+- **Spot > fair** (AMM overprices X): Sell X to AMM. Optimal size: `Δx = √(k(1-f)/p) - x`
+
+Higher fees mean arbitrageurs need larger mispricings to profit, so your AMM stays "stale" longer—bad for IM.
+
+### Order Routing
+
+Retail orders split optimally across AMMs to equalize marginal prices post-trade. For two AMMs with fee rates `f₁, f₂`, let `γᵢ = 1 - fᵢ` and `Aᵢ = √(xᵢ γᵢ yᵢ)`. The optimal Y split is:
+
+```
+Δy₁ = (r(y₂ + γ₂Y) - y₁) / (γ₁ + rγ₂)    where r = A₁/A₂
+```
+
+Lower fees → larger `γ` → more flow. But the relationship is nonlinear—small fee differences can shift large fractions of volume.
+
+### Instantaneous Markout
+
+IM measures profitability using the fair price at trade time:
+
+```
+IM = Σ (amount_x × fair_price - amount_y)   for sells (AMM sells X)
+   + Σ (amount_y - amount_x × fair_price)   for buys  (AMM buys X)
+```
+
+- **Retail trades**: Positive IM (you profit from the spread)
+- **Arbitrage trades**: Negative IM (you lose to informed flow)
+
+Good strategies maximize retail IM while minimizing arb losses.
+
+## Why the Normalizer?
+
+Without competition, setting 10% fees would appear profitable—you'd capture huge spreads on the few trades that still execute. The normalizer prevents this: if your fees are too high, retail routes to the 25 bps AMM and you get nothing.
+
+The normalizer also means there's no "free lunch"—you can't beat 25 bps just by setting 24 bps. The optimal fee depends on market conditions.
 
 ## Writing a Strategy
-
-Copy `contracts/src/SimpleStrategy.sol` and implement three functions:
 
 ```solidity
 contract Strategy is AMMStrategyBase {
@@ -44,110 +77,46 @@ contract Strategy is AMMStrategyBase {
 }
 ```
 
-### TradeInfo Fields
+`initialize` is called once at simulation start. `onTrade` is called after every trade on your AMM with:
 
-After each trade, `onTrade` receives:
+| Field | Description |
+|-------|-------------|
+| `isBuy` | `true` if AMM bought X (trader sold X to you) |
+| `amountX` | X traded (WAD precision, 1e18 = 1 unit) |
+| `amountY` | Y traded |
+| `timestamp` | Step number |
+| `reserveX`, `reserveY` | Post-trade reserves |
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `isBuy` | `bool` | `true` if AMM bought token X (trader sold X) |
-| `amountX` | `uint256` | Amount of X traded (WAD, 1e18 = 1 unit) |
-| `amountY` | `uint256` | Amount of Y traded (WAD) |
-| `timestamp` | `uint256` | Simulation step number |
-| `reserveX` | `uint256` | Post-trade X reserves (WAD) |
-| `reserveY` | `uint256` | Post-trade Y reserves (WAD) |
+Return fees in WAD: `25 * BPS` = 25 basis points. Max fee is 10%.
 
-### Fee Precision
+You get 32 storage slots (`slots[0..31]`) and helpers like `wmul`, `wdiv`, `sqrt`.
 
-Fees use WAD precision where `1e18 = 100%`:
-- 25 bps = `25 * BPS` = `25e14`
-- 1% = `1e16`
-
-Use the `BPS` constant: `uint256 fee = 30 * BPS;` for 30 basis points.
-
-### Helper Functions
-
-Inherit from `AMMStrategyBase` to get:
-
-| Function | Description |
-|----------|-------------|
-| `wmul(x, y)` | Multiply two WAD values |
-| `wdiv(x, y)` | Divide two WAD values |
-| `clamp(v, min, max)` | Clamp value to range |
-| `clampFee(fee)` | Clamp fee to [0, MAX_FEE] |
-| `bpsToWad(bps)` | Convert basis points to WAD |
-| `wadToBps(wad)` | Convert WAD to basis points |
-| `sqrt(x)` | Integer square root |
-| `absDiff(a, b)` | Absolute difference |
-
-### Storage
-
-You have 32 storage slots (`slots[0]` through `slots[31]`) for persistent state:
-
-```solidity
-slots[0] = value;           // Write
-uint256 v = slots[0];       // Read
-```
-
-## Constraints
-
-| Constraint | Value |
-|------------|-------|
-| Max fee | 10% (`MAX_FEE = 1e17`) |
-| Min fee | 0 |
-| Storage slots | 32 (`uint256[32]`) |
-| `initialize()` gas | 250,000 |
-| `onTrade()` gas | 250,000 |
-
-## CLI Reference
-
-### Run simulations
+## CLI
 
 ```bash
-amm-match run <strategy.sol> [options]
+# Build the Rust engine
+cd amm_sim_rs && pip install maturin && maturin develop --release && cd ..
+
+# Install
+pip install -e .
+
+# Run 99 simulations (default)
+amm-match run my_strategy.sol
+
+# Quick test
+amm-match run my_strategy.sol --simulations 10
+
+# Validate without running
+amm-match validate my_strategy.sol
 ```
 
-Options:
-- `--simulations N` - Number of simulations (default: 99)
-- `--steps N` - Steps per simulation (default: 10,000)
-- `--volatility V` - Annualized volatility
-- `--retail-rate R` - Retail arrival rate per step
-- `--retail-size S` - Mean retail trade size
+Output is your average IM across simulations. The 25 bps normalizer typically scores around 250-350 IM depending on market conditions.
 
-### Validate only
+## Ideas to Explore
 
-```bash
-amm-match validate <strategy.sol>
-```
+- **Volatility adaptation**: Wider spreads in volatile markets
+- **Flow imbalance**: Adjust fees based on buy/sell ratio
+- **Inventory management**: Tighten fees when reserves are balanced
+- **Time-of-day effects**: The simulation has structure you can exploit
 
-## Scoring
-
-**Instantaneous Markout (IM)** measures profitability by comparing the price at trade time to the "true" market price:
-
-- Positive IM = profitable trades (good)
-- Negative IM = adverse selection (bad)
-
-Your score is the average IM across all simulations. Higher is better.
-
-## Examples
-
-See `contracts/src/examples/AdaptiveStrategy.sol` for a more sophisticated strategy that adjusts fees based on trade flow imbalance.
-
-## Project Structure
-
-```
-contracts/
-  src/
-    IAMMStrategy.sol      # Interface
-    AMMStrategyBase.sol   # Base contract with helpers
-    SimpleStrategy.sol    # Starter template
-    examples/
-      AdaptiveStrategy.sol
-amm_sim_rs/               # Rust simulation engine
-amm_competition/          # Python CLI
-tests/                    # Test suite
-```
-
-## License
-
-MIT
+See `contracts/src/examples/AdaptiveStrategy.sol` for a starting point.
