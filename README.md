@@ -2,6 +2,12 @@
 
 Design dynamic fee strategies for a constant-product AMM. Your goal: maximize **Instantaneous Markout (IM)**.
 
+## Submission
+
+Submit your strategy at [ammchallenge.com](https://ammchallenge.com). Upload a `.sol` file containing a contract named `Strategy` that inherits from `AMMStrategyBase`.
+
+Local results may diverge slightly from submission scores due to different RNG seeds. Run more simulations locally (`--simulations 99`) to reduce variance and get closer to expected server results.
+
 ## The Simulation
 
 Each simulation runs 10,000 steps. At each step:
@@ -10,7 +16,25 @@ Each simulation runs 10,000 steps. At each step:
 2. **Arbitrageurs trade** — They push each AMM's spot price toward `p`, extracting profit
 3. **Retail orders arrive** — Random buy/sell orders get routed optimally across AMMs
 
-Your strategy competes against a **normalizer AMM** running fixed 25 bps fees. Both AMMs start with identical reserves (100 X, 10,000 Y). Retail flow splits optimally between them based on fees—lower fees attract more volume.
+Your strategy competes against a **normalizer AMM** running fixed 25 bps fees. Both AMMs start with identical reserves (100 X, 10,000 Y at price 100).
+
+### Price Process
+
+The fair price follows GBM: `dS = μSdt + σSdW`
+
+- Drift `μ = 0` (no directional bias)
+- Volatility `σ ~ U[0.95%, 1.15%]` per step (varies across simulations)
+- Time step `dt = 1/252` (daily)
+
+### Retail Flow
+
+Uninformed traders arrive via Poisson process:
+
+- Arrival rate `λ ~ U[0.6, 1.0]` orders per step
+- Order size `~ LogNormal(μ, σ=1.2)` with mean `~ U[18, 20]` in Y terms
+- Direction: 50% buy, 50% sell
+
+Retail flow splits optimally between AMMs based on fees—lower fees attract more volume.
 
 ## The Math
 
@@ -111,12 +135,3 @@ amm-match validate my_strategy.sol
 ```
 
 Output is your average IM across simulations. The 25 bps normalizer typically scores around 250-350 IM depending on market conditions.
-
-## Ideas to Explore
-
-- **Volatility adaptation**: Wider spreads in volatile markets
-- **Flow imbalance**: Adjust fees based on buy/sell ratio
-- **Inventory management**: Tighten fees when reserves are balanced
-- **Time-of-day effects**: The simulation has structure you can exploit
-
-See `contracts/src/examples/AdaptiveStrategy.sol` for a starting point.
