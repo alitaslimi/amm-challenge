@@ -23,7 +23,7 @@ class BaselineSimulationSettings:
 
 
 BASELINE_SETTINGS = BaselineSimulationSettings(
-    n_simulations=99,
+    n_simulations=1000,
     n_steps=10000,
     initial_price=100.0,
     initial_x=100.0,

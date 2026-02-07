@@ -8,7 +8,7 @@ Design dynamic fee strategies for a constant-product AMM. Your goal: maximize **
 
 Upload a `.sol` file containing a contract named `Strategy` that inherits from `AMMStrategyBase`.
 
-Local results may diverge slightly from submission scores due to different RNG seeds. Run more simulations locally (`--simulations 99`) to reduce variance and get closer to expected server results.
+Local results may diverge slightly from submission scores due to different RNG seeds. Run more simulations locally (`--simulations 1000`) to reduce variance and get closer to expected server results.
 
 ## The Simulation
 
@@ -175,7 +175,7 @@ cd amm_sim_rs && pip install maturin && maturin develop --release && cd ..
 # Install
 pip install -e .
 
-# Run 99 simulations (default)
+# Run 1000 simulations (default)
 amm-match run my_strategy.sol
 
 # Quick test

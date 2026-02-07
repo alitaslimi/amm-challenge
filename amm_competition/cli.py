@@ -185,7 +185,7 @@ def main() -> int:
         epilog="""
 Examples:
   amm-match run my_strategy.sol
-  amm-match run my_strategy.sol --simulations 99 --steps 1000
+  amm-match run my_strategy.sol --simulations 1000 --steps 1000
   amm-match validate my_strategy.sol
         """,
     )
